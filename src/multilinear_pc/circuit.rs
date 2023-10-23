@@ -1,4 +1,3 @@
-
 /// circuit to verify poly commitment
 use ark_ec::{pairing::{Pairing, self}, CurveGroup};
 use digest::crypto_common::Iv;
@@ -12,6 +11,7 @@ use ark_r1cs_std::{prelude::*, fields::fp::FpVar, groups::bls12::G1PreparedVar};
 use ark_relations::{
     r1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError},
 };
+use crate::ark_std::UniformRand;
 use ark_std::ops::Sub;
 use ark_ec::VariableBaseMSM;
 use ark_std::ops::Mul;
@@ -23,7 +23,7 @@ use ark_ec::AffineRepr;
 /// data structures used by multilinear extension commitment scheme
 
 #[derive(Clone)]
-struct MulGtVerificaion<E, IV>
+struct PSTVerification<E, IV>
 where
     E: Pairing,
     IV: PairingVar<E>,
@@ -35,7 +35,7 @@ where
     proof: Proof<E>,
     _iv: PhantomData<IV>,
 }
-impl<E, IV> MulGtVerificaion<E, IV>
+impl<E, IV> PSTVerification<E, IV>
 where
     E: Pairing,
     IV: PairingVar<E>,
@@ -56,7 +56,7 @@ where
 
 
 
-impl<E, IV> ConstraintSynthesizer<<E as Pairing>::BaseField> for MulGtVerificaion<E, IV>
+impl<E, IV> ConstraintSynthesizer<<E as Pairing>::BaseField> for PSTVerification<E, IV>
 where
     E: Pairing,
     IV: PairingVar<E>,
@@ -102,19 +102,47 @@ where
         let right_prepared = IV::prepare_g2(&vk_h_var)?;
         let left = IV::pairing(left_prepared, right_prepared)?;
         
-
+        
+        //calculating msm with framework function outside the circuit
         let scalar_size = E::ScalarField::MODULUS_BIT_SIZE as usize;
         let window_size = FixedBase::get_mul_window_size(self.vk.nv);
 
         let g_table = FixedBase::get_window_table(scalar_size, window_size, self.vk.g.into_group());
         let g_mul: Vec<E::G1> = FixedBase::msm(scalar_size, window_size, &g_table, self.point.as_slice());
 
+
+
+        //calculate basic msm
+        let mut res = Vec::new();
+        for s in self.point.into_iter() {
+            res.push(self.vk.g.mul(s));
+        }
+        
+        //check basic msm with basic vector
+        assert_eq!(res, g_mul);
+
+        let mut res_var = Vec::new();
+
+        for p in point_var.into_iter() {
+           
+            let x = vk_g_var.scalar_mul_le(p.to_bits_le()?.iter())?;
+            res_var.push(x);
+        }
+        
+
+        //do msm with circuit variable
         let mut g_mul_var = Vec::new();
         for g_m in g_mul.clone().into_iter(){
             let g_m_var = IV::G1Var::new_witness(cs.clone(), || Ok(g_m))?;
             g_mul_var.push(g_m_var);
         }
-        
+
+
+        //assert vector calculated with msm and allocated is equal to msm calculated locally with variable
+        res_var.enforce_equal(&g_mul_var)?;
+
+
+        //computing other part of the circuit
         let pairing_lefts_var: Vec<_> = (0..self.vk.nv)
             .map(|i| vk_gmask_var[i].clone() - g_mul_var[i].clone())
             .collect();
@@ -132,6 +160,7 @@ where
         let right_ml = IV::miller_loop(&pairing_lefts_prep,&pairing_right_prep)?;
         let right = IV::final_exponentiation(&right_ml).unwrap();
         left.enforce_equal(&right)?;
+        //left.enforce_not_equal(&right)?;
         Ok(())
     }
 }
@@ -169,8 +198,7 @@ mod tests {
 
         let value = poly.evaluate(&point).unwrap();
         let result = MultilinearPC::check(&vk, &com, &point, value, &proof);
-        //assert!(result);
-        let circuit = MulGtVerificaion{
+        let circuit = PSTVerification{
             vk: vk, 
             commitment: com, 
             point: point, 
