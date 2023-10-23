@@ -18,6 +18,9 @@ use ark_std::UniformRand;
 /// data structures used by multilinear extension commitment scheme
 pub mod data_structures;
 
+///constraints for verification
+pub mod circuit;
+
 /// Polynomial Commitment Scheme on multilinear extensions.
 pub struct MultilinearPC<E: Pairing> {
     _engine: PhantomData<E>,
