@@ -144,7 +144,7 @@ where
 
         //computing other part of the circuit
         let pairing_lefts_var: Vec<_> = (0..self.vk.nv)
-            .map(|i| vk_gmask_var[i].clone() - g_mul_var[i].clone())
+            .map(|i| vk_gmask_var[i].clone() - res_var[i].clone())    //.map(|i| vk_gmask_var[i].clone() - g_mul_var[i].clone())
             .collect();
 
         let mut pairing_lefts_prep = Vec::new();
