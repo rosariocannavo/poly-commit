@@ -125,6 +125,9 @@ impl<E: Pairing> MultilinearPC<E> {
             h: params.h,
             nv: supported_num_vars,
         };
+
+
+
         let vk = VerifierKey {
             nv: supported_num_vars,
             g: params.g,

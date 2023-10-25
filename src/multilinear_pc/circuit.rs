@@ -22,7 +22,6 @@ use ark_std::borrow::Borrow;
 use ark_ec::AffineRepr;
 /// data structures used by multilinear extension commitment scheme
 
-#[derive(Clone)]
 struct PSTVerification<E, IV>
 where
     E: Pairing,
@@ -35,6 +34,26 @@ where
     proof: Proof<E>,
     _iv: PhantomData<IV>,
 }
+
+
+impl<E, IV> Clone for PSTVerification<E, IV> 
+    where
+    E: Pairing,
+    IV: PairingVar<E>,
+{
+    fn clone(&self) -> Self {
+        Self {
+            vk: self.vk.clone(),
+            commitment: self.commitment.clone(),
+            point: self.point.clone(),
+            value: self.value.clone(),
+            proof: self.proof.clone(),
+            _iv: self._iv,
+        }
+    }
+}
+
+
 impl<E, IV> PSTVerification<E, IV>
 where
     E: Pairing,
@@ -68,28 +87,30 @@ where
     fn generate_constraints(
         self,
         cs: ConstraintSystemRef<<E as Pairing>::BaseField>,
-    ) -> Result<(), SynthesisError> {
+    ) -> Result<(), SynthesisError> {   
         
         // allocate verifierkey field
         let vk_g_var  = IV::G1Var::new_input(cs.clone(), || Ok(self.vk.g))?;
-        let vk_h_var = IV::G2Var::new_input(cs.clone(), || Ok(self.vk.h))?;
+
+        
+        let vk_h_var = IV::G2Var::new_witness(cs.clone(), || Ok(self.vk.h))?;
         let mut vk_gmask_var = Vec::new();
         for g_mask in self.vk.g_mask_random.clone().into_iter(){
-            let g_mask_var = IV::G1Var::new_input(cs.clone(), || Ok(g_mask))?;
+            let g_mask_var = IV::G1Var::new_witness(cs.clone(), || Ok(g_mask))?;
             vk_gmask_var.push(g_mask_var);
         }
         // allocate commitment
-        let com_g1_prod_var = IV::G1Var::new_input(cs.clone(), || Ok(self.commitment.g_product))?;
+        let com_g1_prod_var = IV::G1Var::new_witness(cs.clone(), || Ok(self.commitment.g_product))?;
         // allocate point
         let mut point_var = Vec::new();
         for p in self.point.clone().into_iter(){
             let scalar_in_fq = &E::BaseField::from_bigint(<E::BaseField as PrimeField>::BigInt::from_bits_le(p.into_bigint().to_bits_le().as_slice())).unwrap();
-            let p_var = FpVar::new_input(cs.clone(), || Ok(scalar_in_fq))?;
+            let p_var = FpVar::new_witness(cs.clone(), || Ok(scalar_in_fq))?;
             point_var.push(p_var);
         }
         // allocate value
         let scalar_in_fq = &E::BaseField::from_bigint(<E::BaseField as PrimeField>::BigInt::from_bits_le(self.value.into_bigint().to_bits_le().as_slice())).unwrap();
-        let value_var = FpVar::new_input(cs.clone(), || Ok(scalar_in_fq))?;
+        let value_var = FpVar::new_witness(cs.clone(), || Ok(scalar_in_fq))?;
         // allocate proof
         let mut proofs_var = Vec::new();
         for proof in self.proof.proofs.clone().into_iter(){
@@ -102,10 +123,11 @@ where
         let right_prepared = IV::prepare_g2(&vk_h_var)?;
         let left = IV::pairing(left_prepared, right_prepared)?;
         
-        
-        //calculating msm with framework function outside the circuit
-        let scalar_size = E::ScalarField::MODULUS_BIT_SIZE as usize;
-        let window_size = FixedBase::get_mul_window_size(self.vk.nv);
+
+                
+        // //calculating msm with framework function outside the circuit
+        // let scalar_size = E::ScalarField::MODULUS_BIT_SIZE as usize;
+        // let window_size = FixedBase::get_mul_window_size(self.vk.nv);
 
 
         /*
@@ -174,6 +196,7 @@ mod tests {
     use crate::multilinear_pc::data_structures::UniversalParams;
     use crate::multilinear_pc::{MultilinearPC, circuit};
     use ark_bls12_377::Bls12_377;
+    use ark_bls12_377::g1::G1Projective;
     use ark_bls12_381::Bls12_381;
     use ark_ec::pairing::Pairing;
     use ark_poly::{DenseMultilinearExtension, MultilinearExtension, SparseMultilinearExtension};
@@ -182,6 +205,7 @@ mod tests {
     use ark_std::vec::Vec;
     type E = Bls12_377;
     use ark_relations::r1cs::ConstraintSystem;
+    use digest::KeyInit;
     type Fr = <E as Pairing>::ScalarField;
     use super::*;
     use ark_ec::bls12::Bls12;
@@ -191,7 +215,7 @@ mod tests {
     use ark_bw6_761::BW6_761 as P;
     use ark_crypto_primitives::snark::SNARK;
     use rand_core::OsRng;
-
+    use ark_ff::{ToConstraintField, Field};
 
     fn test_polynomial<R: RngCore>(
         uni_params: &UniversalParams<E>,
@@ -232,7 +256,7 @@ mod tests {
         let point: Vec<_> = (0..nv).map(|_| Fr::rand(rng)).collect();
         let com = MultilinearPC::commit(&ck, poly);
         let proof = MultilinearPC::open(&ck, poly, &point);
-
+        let vkk = vk.clone();
         let value = poly.evaluate(&point).unwrap();
         let result = MultilinearPC::check(&vk, &com, &point, value, &proof);
         //assert!(result);
@@ -244,13 +268,34 @@ mod tests {
             proof: proof,
             _iv: PhantomData::<IV>,
         };
-        // let mut rng2 = rand_chacha::ChaChaRng::seed_from_u64(1776);
-        // let (pk, vk) = Groth16::<P>::circuit_specific_setup(circuit.clone(), &mut rng2).unwrap();
-        // let proof = Groth16::<P>::prove(&pk, circuit.clone(), &mut OsRng).unwrap();
-        // let public_inputs = circuit.clone().result.unwrap().0.to_field_elements().unwrap();
-        // let ok = Groth16::<P>::verify(&pk.vk, &public_inputs , &proof).unwrap();
-        // assert!(ok);
+
+    
+   
+        let mut rng2 = rand_chacha::ChaChaRng::seed_from_u64(1776);
+        let (pk, vk) = Groth16::<P>::circuit_specific_setup(circuit.clone(), &mut rng2).unwrap();
+        let proof = Groth16::<P>::prove(&pk, circuit.clone(), &mut OsRng).unwrap();
+
+
+        let _x = circuit.vk.g.into_group();
+
+        let y: G1Projective = circuit.vk.g.into();
+        
+        let mut v = Vec::new();
+        v.push(y);
+        let inputs = v
+            .iter()
+            .flat_map(|p| p.to_field_elements().unwrap())
+            .collect::<Vec<_>>();
+
+
+
+
+        assert!(Groth16::<P>::verify(&vk, &inputs, &proof).unwrap());
+
     }
+
+    
+ 
 
 
     #[test]
