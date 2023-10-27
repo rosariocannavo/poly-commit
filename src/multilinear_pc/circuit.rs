@@ -90,10 +90,10 @@ where
     ) -> Result<(), SynthesisError> {   
         
         // allocate verifierkey field
-        let vk_g_var  = IV::G1Var::new_input(cs.clone(), || Ok(self.vk.g))?;
+        let vk_g_var  = IV::G1Var::new_witness(cs.clone(), || Ok(self.vk.g))?;
 
         
-        let vk_h_var = IV::G2Var::new_witness(cs.clone(), || Ok(self.vk.h))?;
+        let vk_h_var = IV::G2Var::new_input(cs.clone(), || Ok(self.vk.h))?;
         let mut vk_gmask_var = Vec::new();
         for g_mask in self.vk.g_mask_random.clone().into_iter(){
             let g_mask_var = IV::G1Var::new_witness(cs.clone(), || Ok(g_mask))?;
@@ -207,6 +207,7 @@ mod tests {
     use ark_relations::r1cs::ConstraintSystem;
     use digest::KeyInit;
     type Fr = <E as Pairing>::ScalarField;
+    type Fp = <E as Pairing>::BaseField;    //base field here
     use super::*;
     use ark_ec::bls12::Bls12;
     type IV = ark_bls12_377::constraints::PairingVar;
@@ -216,6 +217,7 @@ mod tests {
     use ark_crypto_primitives::snark::SNARK;
     use rand_core::OsRng;
     use ark_ff::{ToConstraintField, Field};
+    use ark_groth16::prepare_verifying_key;
 
     fn test_polynomial<R: RngCore>(
         uni_params: &UniversalParams<E>,
@@ -273,29 +275,61 @@ mod tests {
    
         let mut rng2 = rand_chacha::ChaChaRng::seed_from_u64(1776);
         let (pk, vk) = Groth16::<P>::circuit_specific_setup(circuit.clone(), &mut rng2).unwrap();
+
         let proof = Groth16::<P>::prove(&pk, circuit.clone(), &mut OsRng).unwrap();
+        let params = Groth16::<P>::generate_random_parameters_with_reduction(circuit.clone(), &mut rng2).unwrap();
+        let pvk = prepare_verifying_key(&params.vk);
 
-
-        let _x = circuit.vk.g.into_group();
-
-        let y: G1Projective = circuit.vk.g.into();
         
-        let mut v = Vec::new();
-        v.push(y);
-        let inputs = v
-            .iter()
-            .flat_map(|p| p.to_field_elements().unwrap())
-            .collect::<Vec<_>>();
+        //test on G1
+        let vk_g = circuit.vk.g;
+        let x = vk_g.x().unwrap();
+        let y = vk_g.y().unwrap();
+
+        let z = Fp::ONE;
+        let zz = Fp::ZERO;
+
+        //assert!(Groth16::<P>::verify(&vk, &[*x, *y, z], &proof).unwrap()); SI
+        //assert!(Groth16::<P>::verify(&vk, &[*y, *x, z], &proof).unwrap()); NO invertiti
+        //assert!(Groth16::<P>::verify(&vk, &[*x, *y, zz], &proof).unwrap()); NO zero
+
+
+        //test on G1
+        //G1 element x and y are defined over a Fp field
+        let comm_g_prod = circuit.commitment.g_product;
+        let x_c = comm_g_prod.x().unwrap();
+        let y_c = comm_g_prod.y().unwrap();
+        //assert!(Groth16::<P>::verify(&vk, &[*x, *y, z, *x_c, *y_c, z], &proof).unwrap());  SI 
 
 
 
+        // In a quadratic extension field Fp2 over a base field Fp, an element can be represented as  a+b⋅α, where a and b belong to Fp
+        // and α is a root of an irreducible polynomial over Fp
 
-        assert!(Groth16::<P>::verify(&vk, &inputs, &proof).unwrap());
+        //On G2 x and y are defined over a Fp2 field as c=a+b⋅α, is possible to extract a and b that are element of Fp reducing them as follow:
+        //  - a is the residue of the real part of c after reducing it modulo p.
+        //  - b is the residue of the coefficient of the imaginary part (the element multiplied by α after reducing it modulo p.
 
-    }
+        //test on G2
+        let vk_h = circuit.vk.h;
+        
+        let x_c0 = vk_h.x().unwrap().c0;
+        let x_c1 = vk_h.x().unwrap().c1;
+        
+        let y_c0 = vk_h.y().unwrap().c0;
+        let y_c1 = vk_h.y().unwrap().c1;
 
+        //The one element in Fp2 is represented as 1 + 0 * α,  because in a field, the multiplicative identity element is 1 and the additive identity is 0
+        //In this case, the element 1 + 0 * α, is the equivalent of the multiplicative identity within the field extension Fp2.
+        //For operations within the field extension Fp2 the element 1 + 0 * α would act as the multiplicative identity, similar to how 1 is the multiplicative identity over Fp.
+
+
+        let ONE = Fp::ONE;
+        let ZERO = Fp::ZERO;
     
- 
+        assert!(Groth16::<P>::verify(&vk, &[x_c0, x_c1, y_c0, y_c1, ONE, ZERO], &proof).unwrap());   
+        
+    }
 
 
     #[test]
