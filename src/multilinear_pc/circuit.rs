@@ -338,7 +338,7 @@ mod tests {
 
     fn test_final_groth<R: RngCore>(
         uni_params: &UniversalParams<E>,
-        poly: &impl MultilinearExtension<Fr>,
+        poly: &impl MultilinearExtension<Fr>,   //prende una reference a a un qualsiasi tipo che implementa il trait MultilinearExtension
         rng: &mut R,
     ) {
 
@@ -352,7 +352,7 @@ mod tests {
         let value = poly.evaluate(&point).unwrap();
         let result = MultilinearPC::check(&vk, &com, &point, value, &proof);
 
-        let circuit = PSTVerification{
+        let circuit = PSTVerification {
             vk: vk, 
             commitment: com, 
             point: point, 
@@ -362,7 +362,7 @@ mod tests {
         };
 
         //testing on Bls12-377 - Groth on BW6-761
-
+        //All the G1 and G2 Must be affine
         //zero and one on Fp of Bls12-377
         let fp_zero = Fp::ZERO;
         let fp_one = Fp::ONE;
